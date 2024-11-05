@@ -11,8 +11,8 @@ template <class T, class Allocator = std::allocator<T>>
 class my_vector {
 public:
     class iterator {
-        friend 
-        class my_vector<T>;
+        friend class my_vector<T>;
+
     public:
         iterator() = default;
 
@@ -69,7 +69,7 @@ public:
         bool operator!=(const iterator& anoth) const {
             return obj_ != anoth.obj_ || ind_ != anoth.ind_;
         }
-        
+
         bool operator<(const iterator& anoth) const {
             check_obj(anoth);
             return ind_ < anoth.ind_;
@@ -89,7 +89,6 @@ public:
             check_obj(anoth);
             return ind_ >= anoth.ind_;
         }
-
 
     private:
         void check_obj(const iterator& anoth) const {
@@ -112,8 +111,8 @@ public:
     };
 
     class const_iterator {
-        friend 
-        class my_vector<T>;
+        friend class my_vector<T>;
+
     public:
         const_iterator() = default;
 
@@ -230,7 +229,9 @@ public:
         realloc(list.size(), list.size(), list, list.size());
     }
 
-    ~my_vector() = default;
+    ~my_vector() {
+        clear();
+    }
 
     my_vector& operator=(const my_vector& anoth) {
         realloc(anoth.size_, anoth.size_, anoth, anoth.size_);
@@ -265,7 +266,8 @@ public:
         if (size_ == capacity_) {
             realloc(size_, new_capacity(), *this, size_);
         }
-        data_[size_++] = val;
+        new (data_ + size_) T(val);
+        size_++;
     }
 
     template <class... Args>
@@ -273,13 +275,15 @@ public:
         if (size_ == capacity_) {
             realloc(size_, new_capacity(), *this, size_);
         }
-        data_[size_++] = T(std::forward<Args>(args)...);
+        new (data_ + size_) T(std::forward<Args>(args)...);
+        size_++;
     }
 
     void pop_back() {
         if (size_ == 0) {
             throw std::exception();
         }
+        data_[size_].~T();
         size_--;
     }
 
@@ -314,13 +318,17 @@ public:
     }
 
     void swap(my_vector& anoth) {
-        data_.swap(anoth.data_);
+        std::swap(data_, anoth.data_);
         std::swap(size_, anoth.size_);
         std::swap(capacity_, anoth.capacity_);
     }
 
     void clear() {
-        data_.reset();
+        for (size_t i = 0; i < size_; ++i) {
+            data_[i].~T();
+        }
+        Allocator().deallocate(data_, capacity_);
+        data_ = nullptr;
         size_ = 0;
         capacity_ = 0;
     }
@@ -370,11 +378,11 @@ public:
     }
 
     T* data() {
-        return data_.get();
+        return data_;
     }
 
     const T* data() const {
-        return data_.get();
+        return data_;
     }
 
     void insert(iterator it, const T& val) {
@@ -382,10 +390,36 @@ public:
             throw std::exception();
         }
         emplace_back();
+        std::exception_ptr eptr;
+        size_t exception_index = size_;
         for (size_t i = size_ - 1; i > it.ind_; --i) {
-            data_[i] = data_[i - 1];
+            try {
+                data_[i] = data_[i - 1];
+            } catch (...) {
+                eptr = std::current_exception();
+                exception_index = i;
+                break;
+            }
         }
-        data_[it.ind_] = val;
+        if (!eptr) {
+            try {
+                data_[it.ind_] = val;
+            } catch (...) {
+                eptr = std::current_exception();
+                exception_index = it.ind_;
+            }
+        }
+        if (eptr) {
+            try {
+                for (size_t i = exception_index; i + 1 < size_; ++i) {
+                    data_[i] = data_[i + 1];
+                }
+                pop_back();
+            } catch (...) {
+            }
+
+            std::rethrow_exception(eptr);
+        }
     }
 
     template <class... Args>
@@ -394,23 +428,70 @@ public:
             throw std::exception();
         }
         emplace_back();
+        std::exception_ptr eptr;
+        size_t exception_index = size_;
         for (size_t i = size_ - 1; i > it.ind_; --i) {
-            data_[i] = data_[i - 1];
+            try {
+                data_[i] = data_[i - 1];
+            } catch (...) {
+                eptr = std::current_exception();
+                exception_index = i;
+                break;
+            }
         }
-        data_[it.ind_] = T(std::forward<Args>(args)...);
+        if (!eptr) {
+            try {
+                data_[it.ind_] = T(std::forward<Args>(args)...);
+            } catch (...) {
+                eptr = std::current_exception();
+                exception_index = it.ind_;
+            }
+        }
+        if (eptr) {
+            try {
+                for (size_t i = exception_index; i + 1 < size_; ++i) {
+                    data_[i] = data_[i + 1];
+                }
+                pop_back();
+            } catch (...) {
+            }
+
+            std::rethrow_exception(eptr);
+        }
     }
 
     void erase(iterator it) {
         if (it.ind_ >= size_) {
             throw std::exception();
         }
+
+        T saved_value = data_[it.ind_];
+        std::exception_ptr eptr;
+        size_t exception_index = size_;
         for (size_t i = it.ind_; i + 1 < size_; ++i) {
-            data_[i] = data_[i + 1];
+            try {
+                data_[i] = data_[i + 1];
+            } catch (...) {
+                eptr = std::current_exception();
+                exception_index = i;
+                break;
+            }
+        }
+        if (eptr) {
+            try {
+                for (size_t i = exception_index; i > it.ind_; --i) {
+                    data_[i] = data_[i - 1];
+                }
+                data_[it.ind_] = saved_value;
+            } catch (...) {
+            }
+
+            std::rethrow_exception(eptr);
         }
         pop_back();
     }
 
-    bool operator==(const my_vector& anoth) {
+    bool operator==(const my_vector& anoth) const {
         if (size_ != anoth.size_) {
             return false;
         }
@@ -423,7 +504,7 @@ public:
         return true;
     }
 
-    bool operator!=(const my_vector& anoth) {
+    bool operator!=(const my_vector& anoth) const {
         if (size_ != anoth.size_) {
             return true;
         }
@@ -438,39 +519,39 @@ public:
 
 private:
     void realloc(size_t new_size, size_t new_capacity, const T& val = T()) {
-        std::unique_ptr<T[]> new_data = nullptr;
         if (new_capacity == 0) {
-            data_.swap(new_data);
+            clear();
             return;
         }
-        new_data.reset(Allocator().allocate(new_capacity));
+        T* new_data = Allocator().allocate(new_capacity);
         for (int i = 0; i < new_size; ++i) {
-            new_data[i] = val;
+            new (new_data + i) T(val);
         }
 
-        data_.swap(new_data);
+        clear();
+        data_ = new_data;
         size_ = new_size;
         capacity_ = new_capacity;
     }
 
     template <class C>
     void realloc(size_t new_size, size_t new_capacity, const C& copy_from, size_t copy_size) {
-        std::unique_ptr<T[]> new_data = nullptr;
         if (new_capacity == 0) {
-            data_.swap(new_data);
+            clear();
             return;
         }
-        new_data.reset(Allocator().allocate(new_capacity));
+        T* new_data = Allocator().allocate(new_capacity);
         auto it = copy_from.begin();
         for (size_t i = 0; i < copy_size; ++i) {
-            new_data[i] = *it;
+            new (new_data + i) T(*it);
             ++it;
         }
         for (size_t i = copy_size; i < new_size; ++i) {
-            new_data[i] = T();
+            new (new_data + i) T();
         }
 
-        data_.swap(new_data);
+        clear();
+        data_ = new_data;
         size_ = new_size;
         capacity_ = new_capacity;
     }
@@ -484,7 +565,7 @@ private:
         return capacity_ * factor_;
     }
 
-    std::unique_ptr<T[]> data_ = nullptr;
+    T* data_ = nullptr;
     size_t size_ = 0;
     size_t capacity_ = 0;
 };

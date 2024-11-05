@@ -2,6 +2,7 @@
 #include "Vector.h"
 #include <cassert>
 #include <iostream>
+#include <cstring>
 
 using std::vector;
 
@@ -46,20 +47,19 @@ void test_constructor_copy_swap_clear() {
     b.clear();
     compare(my_c, b);
 
-    my_vector <int> my_d = {1, 2, 3};
-    my_vector <int> my_e = {4, 5, 6};
-    vector <int> d = {4, 5, 6};
-    vector <int> e = {1, 2, 3};
+    my_vector<int> my_d = {1, 2, 3};
+    my_vector<int> my_e = {4, 5, 6};
+    vector<int> d = {4, 5, 6};
+    vector<int> e = {1, 2, 3};
     my_d.swap(my_e);
     compare(my_d, d);
     compare(my_e, e);
-
 }
 
 void test_resize_reserve_assign_shrink() {
     my_vector<int> my_a;
     my_a.resize(3);
-    vector <int> a;
+    vector<int> a;
     a.resize(3);
 
     compare(my_a, a);
@@ -86,7 +86,7 @@ void test_push_pop() {
     int y[n] = {10, 9, 8, 7, 6, 5, 4, 3, 2, 1};
 
     my_vector<int> my_a;
-    vector <int> a;
+    vector<int> a;
     for (int i = 0; i < n; ++i) {
         my_a.push_back(x[i]);
         a.push_back(x[i]);
@@ -98,8 +98,8 @@ void test_push_pop() {
         compare(my_a, a);
     }
 
-    my_vector<std::pair <int, int>> my_b;
-    vector<std::pair <int, int>> b;
+    my_vector<std::pair<int, int>> my_b;
+    vector<std::pair<int, int>> b;
     for (int i = 0; i < 10; ++i) {
         my_b.emplace_back(x[i], y[i]);
         b.emplace_back(x[i], y[i]);
@@ -118,8 +118,8 @@ void test_insert_emplace_erase() {
     int x[n] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
     int y[n] = {10, 9, 8, 7, 6, 5, 4, 3, 2, 1};
 
-    my_vector <int> my_a;
-    vector <int> a;
+    my_vector<int> my_a;
+    vector<int> a;
     for (int i = 0; i < n; ++i) {
         my_a.insert(my_a.begin() + pos[i], x[i]);
         a.insert(a.begin() + pos[i], x[i]);
@@ -131,8 +131,8 @@ void test_insert_emplace_erase() {
         compare(my_a, a);
     }
 
-    my_vector <std::pair <int, int>> my_b;
-    vector <std::pair <int, int>> b;
+    my_vector<std::pair<int, int>> my_b;
+    vector<std::pair<int, int>> b;
     for (int i = 0; i < n; ++i) {
         my_b.emplace(my_b.begin() + pos[i], x[i], y[i]);
         b.emplace(b.begin() + pos[i], x[i], y[i]);
@@ -146,8 +146,8 @@ void test_insert_emplace_erase() {
 }
 
 void test_iterators() {
-    my_vector <int> my_a = {1, 2, 3, 4, 5, 6, 7};
-    vector <int> a = {1, 2, 3, 4, 5, 6, 7};
+    my_vector<int> my_a = {1, 2, 3, 4, 5, 6, 7};
+    vector<int> a = {1, 2, 3, 4, 5, 6, 7};
 
     for (int i = 0; i <= 7; ++i) {
         for (int j = 0; j <= 7; ++j) {
@@ -173,7 +173,7 @@ void test_iterators() {
         }
     }
 
-    const my_vector <int> const_my_a = {1, 2, 3, 4, 5, 6, 7};
+    const my_vector<int> const_my_a = {1, 2, 3, 4, 5, 6, 7};
     for (int i = 0; i <= 7; ++i) {
         for (int j = 0; j <= 7; ++j) {
             auto it_i = const_my_a.begin() + i;
@@ -199,6 +199,112 @@ void test_iterators() {
     }
 }
 
+struct LifeTester {
+    LifeTester() {
+        LifeTester::cnt_alive++;
+    }
+
+    LifeTester(const LifeTester& a) {
+        LifeTester::cnt_alive++;
+    }
+
+    LifeTester(LifeTester&& a) {
+        LifeTester::cnt_alive++;
+    }
+
+    ~LifeTester() {
+        LifeTester::cnt_alive--;
+    }
+
+    LifeTester& operator=(const LifeTester& a) {
+        return *this;
+    }
+
+    static int alive() {
+        return LifeTester::cnt_alive;
+    }
+
+private:
+    static int cnt_alive;
+};
+
+int LifeTester::cnt_alive = 0;
+
+void test_lifetime() {
+    my_vector<LifeTester> a;
+    a.resize(10);
+    assert(LifeTester::alive() == 10);
+    for (int i = 0; i < 5; ++i) {
+        a.pop_back();
+        assert(LifeTester::alive() == 10 - i - 1);
+    }
+    a.clear();
+    assert(LifeTester::alive() == 0);
+
+    a.reserve(10);
+    assert(LifeTester::alive() == 0);
+    for (int i = 0; i < 10; ++i) {
+        a.emplace_back();
+        assert(LifeTester::alive() == i + 1);
+    }
+
+    for (int i = 0; i < 10; ++i) {
+        a.pop_back();
+        assert(LifeTester::alive() == 10 - i - 1);
+    }
+}
+
+struct BadAssign {
+    BadAssign() {
+    }
+
+    BadAssign(int value) : value(value) {
+    }
+
+    BadAssign& operator=(const BadAssign& a) {
+        if (a.value == 4 && value == 5) {
+            throw std::runtime_error("Pu-pu-pu");
+        }
+        value = a.value;
+        return *this;
+    }
+
+    bool operator==(const BadAssign& a) const {
+        return value == a.value;
+    }
+
+private:
+    int value;
+};
+
+void test_insert_erase_safety() {
+    my_vector<BadAssign> a = {1, 2, 3, 4, 5, 6, 7};
+    bool catched = false;
+    try {
+        a.insert(a.begin(), 0);
+    } catch (std::exception& e) {
+        assert(std::strcmp(e.what(), "Pu-pu-pu") == 0);
+        catched = true;
+    } catch (...) {
+    }
+    assert(catched);
+    vector<BadAssign> b = {1, 2, 3, 4, 5, 6, 7};
+    compare(a, b);
+
+    a = {7, 6, 5, 4, 3, 2, 1};
+    catched = false;
+    try {
+        a.erase(a.begin());
+    } catch (std::exception& e) {
+        assert(std::strcmp(e.what(), "Pu-pu-pu") == 0);
+        catched = true;
+    } catch (...) {
+    }
+    assert(catched);
+    b = {7, 6, 5, 4, 3, 2, 1};
+    compare(a, b);
+}
+
 int main() {
 
     test_constructor_copy_swap_clear();
@@ -206,6 +312,8 @@ int main() {
     test_push_pop();
     test_insert_emplace_erase();
     test_iterators();
+    test_lifetime();
+    test_insert_erase_safety();
 
     std::cout << "All tests passed" << std::endl;
     return 0;
