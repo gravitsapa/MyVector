@@ -1,3 +1,0 @@
-/home/grvtsp/Documents/Vector/build/CMakeFiles/MyVector.dir
-/home/grvtsp/Documents/Vector/build/CMakeFiles/edit_cache.dir
-/home/grvtsp/Documents/Vector/build/CMakeFiles/rebuild_cache.dir
